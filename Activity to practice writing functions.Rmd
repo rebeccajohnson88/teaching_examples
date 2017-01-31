@@ -1,6 +1,6 @@
 ---
-title: 'Programming day two activity: functions and the apply family'
-author: "Methods camp instructors"
+title: 'Activity practice writing functions'
+author: "RJ"
 date: "August 24, 2016"
 output: html_document
 ---
