@@ -1,0 +1,651 @@
+---
+title: 'Programming day two activity: functions and the apply family'
+author: "Methods camp instructors"
+date: "August 24, 2016"
+output: html_document
+---
+
+# Step zero: load the data (finalaedf.csv)
+
+Prompted by Andrew Wakefield's controversial, and since-retracted, article linking the MMR vaccine to autism, recent years have seen protests over childhood vaccination out of concerns that the vaccines will cause autism and other neurological problems.
+
+The data we'll be using relates to these issues. It is from the CDC's *Wonder* database and is compromised of reports that parents and/or their physicians submit to the CDC reporting that a vaccine caused symptoms of autism and/or Asperger's. For today's activity, load the cleaned version of the data: *finalaedf.csv*. If you want to be able to copy/paste code from our resulting answers afterwards, store it as *autismae*. In tomorrow's activity, we're going to be showing you how to get from the very undata-like output of the CDC database to the usable form we're giving you today. 
+
+
+```{r}
+#set working directory and load the data
+setwd("~/Dropbox/Methods camp draft materials/Computing day 2/day 2 activity")
+
+#load data
+autismae <- read.csv("finalaedf.csv")
+
+#remove extra column
+autismae <- subset(autismae, select = -c(X))
+head(autismae, 3)
+```
+
+
+# Step one: progress from a for loop with if/elseif/else statements to a function
+
+You're interested in treating age as a continuous variable, but notice that the data currently codes the variable as a factor variable with different levels. You want to create a new variable (agenumeric) that codes the age categories with the midpoint of the corresponding age range. 
+
+We'll walk through doing this in a less efficient way using a for loop to a more efficient way using a function (we don't promise that the function will be the *most* efficient way, but it's certainly an improvement!)
+
+**Task one**: use a for loop and control flow statements (e.g., if/elseif/else) to explicitly outline each age category and manually enter its midpoint. So for instance, one of the conditionals, would be
+
+if(age == "1-2 years")\{ \newline
+  agenumeric <- 1.5 \newline
+\}
+
+Store the results in a vector *agenumeric*. Code "Unknown" as NA and code months using the appropriate fractions.
+
+```{r}
+#get a list of all the conditions by creating a table of that variable
+#this will also help us make sure we recoded correctly by comparing
+#counts on the original versus recoded variable
+table(autismae$age)
+
+#initialize the empty vector
+agenumeric <- c()
+
+#
+for(i in 1:nrow(autismae)){
+  if(autismae$age[i] == "< 6 months"){
+    agenumeric[i] <- 3/12
+  } else if (autismae$age[i] == "1-2 years"){
+    agenumeric[i] <- 1.5
+  } else if (autismae$age[i] == "18-29 years"){
+    agenumeric[i] <- 23.5
+  } else if (autismae$age[i] == "3-5 years"){
+    agenumeric[i] <- 4
+  } else if (autismae$age[i] == "30-39 years"){
+    agenumeric[i] <- 34.5
+  } else if (autismae$age[i] == "40-49 years"){
+    agenumeric[i] <- 44.5
+  } else if (autismae$age[i] == "6-11 months"){
+    agenumeric[i] <- 8.5/12
+  } else if (autismae$age[i] == "6-17 years"){
+    agenumeric[i] <- 11.5
+  } else if (autismae$age[i] == "60-64 years"){
+    agenumeric[i] <- 62
+  } else {
+    agenumeric[i] <- NA
+  }
+}
+
+#compare tables - looks ok
+table(autismae$age)
+table(agenumeric)
+
+##attach to data and manually inspect
+autismae$agenumeric <- agenumeric
+head(autismae)
+
+```
+
+You probably realized (or hoped!) when writing that string of control flow statements that it was not the most efficient way to code that factor variable to the midpoint of the age categories. In particular, there are two issues:
+
+- Length: it took awhile to write that, and imagine if the categories had been more fine grained!
+- Potential for human error: regardless of your mental arithmetic skills or even if you confirmed each midpoint in R's console before inputting, it's inviting a mistake to happen to manually enter what the midpoint is rather than using a more reliable source (R's built-in calculator)
+
+The latter issue is particularly problematic, so we'll walk through steps to write a function that finds the midpoint of the age category variable for every category. Note that there's no single solution so use your creativity!
+
+**Task two**: write what problem the function is trying to solve. Try to break down the problem into some intermediate steps.
+
+**Answer**: general problem- convert character string that currently makes up the age variable into numeric midpoints for the corresponding ages. Some intermediate steps are: 
+
+1. Finding a way to extract the age range from the string without the extraneous info (years, the range symbol)
+2. Making sure the corresponding ages are numeric
+3. Handling the special case of months
+
+**Task three**: to make the problem into a more manageable number of cases, use subsetting to recode the "< 6 months" level of the age variable to "0-6 months". Before doing so, convert the age variable to a character (it's stored as a factor).
+
+
+```{r}
+#converting age from factor to character
+autismae$age <- as.character(autismae$age)
+
+#recoding the < 6 months category
+autismae$age[autismae$age == "< 6 months"] <- "0-6 months"
+
+```
+
+We're now going to write code outside a function to address the following three cases of the problem:
+
+- Standard age format: e.g., 1-2 years, 6-17 years (the latter to make sure that your method of extracting numbers adequately preserves two digits numbers)
+- Age in months
+- Unknown (to be replaced with NA)
+
+**Task four**: write code to find the midpoint of the first case: a vector in the standard age format case (age in years). Make sure it can accomodate the sub-cases of solely one digit ages (e.g., 1-2 years) and a mix of one and two digit ages (e.g., 6-17 years).
+
+*Hint*: we want this to be a test of your problem-solving skills not a test of your knowledge of how to work with strings, so the following commands might be helpful (but there are many ways to solve so feel free to use others). Here is their structure, and we show an example with a basic vector below:
+
+- gsub: command that searches for a pattern in a string and allows you to substitute a different pattern. The format is: gsub("pattern to replace", "what to replace with", vector to look in). 
+- strsplit: command that allows you to split a string based on some delimiter (similar to text -> columns in excel). The format is: strsplit(vector to split, "what to split on"). Usually returns the results in list format.
+- unlist: converts list to vector if possible. The format is unlist(list you want to convert)
+
+```{r}
+#vector to practice showing the commands
+testvector <- c("5000,10000 dollars")
+
+#how to use gsub to remove the space + dollars
+nodollars <- gsub(" dollars", "", testvector)
+nodollars
+
+#how to use strsplit to extract the 5000 and 10000
+#into separate elements by splitting at the comma
+numberlist <- strsplit(nodollars, ",")
+numberlist
+class(numberlist)
+
+##how to use unlist on the result to end up with a two-element
+##numeric vector with the numbers of interest
+numbervec <- as.numeric(unlist(numberlist))
+numbervec
+class(numbervec); length(numbervec)
+
+```
+
+**Now, you can adapt the code above to deal with the standard age format cases (e.g., 1-3 years, etc)**:
+
+```{r}
+#standard age format
+
+#practice with 1-2 years
+test12 <- c("1-2 years")
+
+#remove years from string
+test12noy <- gsub(" years", "", test12)
+test12noy
+
+#split at dash and convert to numeric
+test12dash <- as.numeric(unlist(strsplit(test12noy, "-")))
+test12dash
+
+#find the midpoint via mean
+mid <- mean(test12dash)
+mid
+
+#combine all steps into one
+mean(as.numeric(unlist(strsplit(gsub("years", "", test12), "-"))))
+
+#test to see if above steps work for 6-17 years
+test617 <- c("6-17 years")
+mean(as.numeric(unlist(strsplit(gsub("years", "", test617), "-"))))
+
+```
+
+
+**Task five**: modify the code you used for the age in years case to deal with the case of age in months. 
+
+```{r}
+#test vector to months
+testmonths <- c("0-6 months")
+
+#find the midpoint- make sure to divide by 12
+#only thing that changes is subbing out months 
+#rather than years
+mean(as.numeric(unlist(strsplit(gsub("months", "", testmonths), "-"))))/12
+
+```
+
+For the case of Unknown, we will deal with this case using a conditional within our function so don't need to write code in advance.
+
+Now you've come up with all you need for the meat of the function. To put the cases together into a function you'll need to do three things:
+
+1. **Generalize**: Replace any references in the above code to a specific vector with a reference to a general vector. This general vector will be one of the arguments in your function
+2. **Add indices**: To apply the function, you'll want to iterate through every element of the vector. Therefore, after step one, make sure to index the vector.
+3. **Check each element for the condition it falls within**: Figure out a way to use if/elseif and else (but you'll only need one of each this time!) to check an element of the character vector for whether it falls into the "years" case, the "months" case, or neither.  The following code may be useful, it returns TRUE if the pattern is found in the vector and FALSE otherwise:
+
+grepl("pattern to search", vector to search for pattern in)
+
+\textcolor{red}{Note: here we labeled these potential functions, and there are likely many other ways to solve (for instance, below we also wrote a function that draws upon the solution Alex and Ferdose's group came up with during the work session that involves recoding age in months to its equivalent in years by calculating what that is and then writing it as a string, which means the function will only have two cases to handle (Unknown and age in years) rather than three cases to handle (Unknown, age in years, age in month)). Whatever is fine and the purpose of this activity was not to generate a single answer but to give you practice in thinking through a common data recoding problem where you need to treat different cases a bit differently}
+
+**Task six**: with the three above steps as your guide, create a function, *agemidfunc* and store it.
+
+```{r}
+#potential function if you want to use indexing with sapply
+agemidfunc <- function(i, charvector){
+  if(grepl('years', charvector[i])){
+    mid <- mean(as.numeric(unlist(strsplit(gsub("years", "", 
+                              charvector[i]), "-"))))
+  } else if (grepl('months', charvector[i])){
+    mid <- mean(as.numeric(unlist(strsplit(gsub("months", "", 
+                              charvector[i]), "-"))))/12
+  } else {
+    mid <- NA
+  }
+  return(mid)
+} 
+
+#potential function without indexing
+agemidfunc.noindex <- function(charvector){
+  if(grepl('years', charvector)){
+    mid <- mean(as.numeric(unlist(strsplit(gsub("years", "", 
+                              charvector), "-"))))
+  } else if (grepl('months', charvector)){
+    mid <- mean(as.numeric(unlist(strsplit(gsub("months", "", 
+                              charvector), "-"))))/12
+  } else {
+    mid <- NA
+  }
+  return(mid)
+} 
+
+#potential function if you recoded months -> years so only have two cases
+#thanks to those who pointed this pre-processing option out in the work session!
+agemidfunc.yearsonly <- function(charvector){
+  mid <- ifelse(grepl('years', charvector), 
+                mean(as.numeric(unlist(strsplit(gsub("years", "", 
+                charvector), "-")))), NA)
+  }
+
+```
+
+
+**Task seven**: use sapply to apply the function to every element of the data's age vector. Store the result (so don't transform directly) as *agemidfuncresult* and then add it to your data.frame.
+
+```{r}
+#for first version of function:
+#create vector of i to iterate over
+i <- 1:nrow(autismae)
+
+##use sapply
+agemidfuncresult <- sapply(i, agemidfunc, 
+                           charvector = autismae$age)
+
+##attach to data
+autismae$agemidfuncresult <- agemidfuncresult
+
+#for second version of function (no index, so
+#apply directly to the vector)
+agemidfuncresult2 <- sapply(autismae$age, agemidfunc.noindex)
+autismae$agemidfuncresult2 <- agemidfuncresult2
+
+#for third version of function (need to recode months to
+#years before inputting age variable in two steps)
+#ifelse statement is saying: if age is 0-6 months (so the logical
+#returns TRUE), recode to this, otherwise, leave as is; and same
+#thing for other months category 
+autismae$ageinyears1 <- ifelse(autismae$age == "0-6 months", "0-0.5 years",
+                               autismae$age)
+autismae$ageinyears2 <- ifelse(autismae$ageinyears1 == "6-11 months",
+                               "0.5 - 0.9166666666 years",
+                               autismae$ageinyears1)
+agemidfuncresult3 <- sapply(autismae$ageinyears2, agemidfunc.yearsonly)
+autismae$agemidfuncresult3 <- agemidfuncresult3
+
+```
+
+**Task eight**: create an indicator variable in the data, and then summarize using table, to make sure the agemidfuncresult variable you created using the function is identical to the agenumeric variable you created using the for loop plus string of conditionals.
+
+
+```{r}
+#checks if two are equal or if they both equal NA (for the unknown) since
+#the equality statement will not work for those cases
+autismae$sameresult <- ifelse((autismae$agenumeric == 
+                            autismae$agemidfuncresult) |
+                            (is.na(autismae$agenumeric) &
+                            is.na(autismae$agemidfuncresult)), 1, 0) 
+table(autismae$sameresult)
+
+#less formally, could also randomly draw some rows to visually inspect
+#if we didn't want to use View(autismae) to view whole data
+#the code is randomly sampling 10 rows to view without replacement
+#and then using subsetting to subset the following rows: age, agenumeric,
+#and any row containing the agemid pattern (so all our agemidfunc results)
+rows2view <- sample(1:nrow(autismae), 10, replace = FALSE)
+autismae[rows2view, c("age", "agenumeric", grep("agemid", colnames(autismae),
+                                   value = TRUE))]
+
+```
+
+---
+
+# Step two: using functions to structure data in a way useful for plotting
+
+We're going to be creating a function that creates and arrays plots of an *individual state's* trends in the counts of parent reports of vaccine events over time.
+
+**Task one**: to make the next steps easier, restrict the data to exclude observations that are missing the year ("Unknown Date") 
+
+```{r}
+autismaecompyear <- autismae[autismae$year != "Unknown Date", ]
+```
+
+**Task two**: before moving to the function, we're going to get the data in a format that is easier to feed the function. Create a new data.frame, *stateyearcounts*, that indicates the number of cases per year for each state. Practice doing this using dplyr and pipes.
+
+
+```{r, warning = FALSE, message = FALSE}
+#load dplyr
+library(dplyr)
+
+#use dplyr to obtain a count of cases by state and year
+#here we specified the package for summarise because we had another
+#package where a command shares that name that was causing errors  
+stateyearcounts <- autismaecompyear %>%
+  group_by(state, year) %>%
+  dplyr::summarise(reports = n())
+
+
+```
+
+## Step 2A- optional challenge exercise
+
+**You can either do this optional challenge exercise, which will give you more practice with dealing with lists in conjunction with functions, or skip the challenge exercise, in which case skip to step three and load the cleaned data.frame: stateyear.csv**
+
+**Task three**: you notice when examining the data that some states have zero cases in assorted years, and you want this to be reflected on the eventual graphs and any others you deide to make. There are different ways to handle. For instance, one way that we will *not* pursue is to create a data.frame that lists each state 18 years (the maximum numbers of years in the data) and assumes reports = 0. Then, we could use a function or for loop to fill in the years the state *does have* a non-zero number of reports.
+
+Here, we'll pursue a different strategy. Write a function that, in combination with sapply, will iterate through each state, using the *stateyearcounts* data.frame, and do the following:
+
+- Find which years the state is missing. The %in% command might be helpful here.
+- Create a data.frame with the following three columns: the state's name, the year that is missing, the number of reports (will be zero). So if Alabama is missing three years--2000, 2005, and 2010--the data.frame will look like this example:
+
+```{r}
+exampledf <- data.frame(state = "Alabama", 
+                        year = c(2000, 2005, 2010), 
+                        reports = 0) 
+exampledf
+
+
+```
+
+- Adds that data.frame to an empty list. So the result will be a list where each element is an individual state's data.frame. So, for instance, it might look like the following
+
+
+```{r}
+#second df to add to list
+exampledf2 <- data.frame(state = "Alaska", 
+                        year = c(2000, 2007), 
+                        reports = 0) 
+
+#list
+statedflist <- list(exampledf, exampledf2)
+statedflist
+
+```
+
+
+- *Hint 1*: notice in the above code that when creating a data.frame, the command defaults to creating a data.frame with the number of rows = the longest vector. So we didn't need to do rep(Alaska, 2) in order for the data.frame to repeat Alaska twice in each row since it's defaulting to the length of the years vector. Let this work to your advantage in the function!
+
+- *Hint 2*: some states have very concerned parents and have reports for every year. Make sure to structure your function in such a way (for instance, by adding a conditional), to handle these states
+
+- Solution: (again multiple, but this is mine)
+
+```{r}
+##initialize empty list
+alldata <- list()
+
+#create a function with steps described below
+missyearfunc <- function(i, statenames, data, allyears){
+  statetoselect <- as.character(statenames[i])#selects a state
+  statesubset <- subset(stateyearcounts, state == statetoselect) #subsets df to that state
+  yearsinstatesubset <- statesubset$year #finds years for that state
+  
+  ##subsets the vector of all years possible to years not found for that
+  ##particular state
+  yearsnotinstatesubset <- allyears[!(allyears %in% yearsinstatesubset)]
+  
+  ##restricts adding the data.frame to states with at least 1 missing year
+  if(length(yearsnotinstatesubset) > 0){
+    datatoadd <- data.frame(state = statetoselect,
+                          year = yearsnotinstatesubset, 
+                          reports = 0)
+    alldata[[statetoselect[i]]] <- datatoadd
+  }
+}
+
+
+##all possible years and state names
+allyears <- unique(stateyearcounts$year)
+i <- 1:length(unique(stateyearcounts$state))
+
+##returns list with all state's missing year data.frames
+missingyearslist <- sapply(i, 
+               missyearfunc, statenames = unique(stateyearcounts$state),
+               data = stateyearcounts, 
+               allyears = allyears) 
+
+head(missingyearslist)
+```
+
+**Task four**: use the command do.call("rbind", name of your list) to turn the list into a data.frame and then use rbind.data.frame to bind the results to your main *stateyearcounts* data.frame, saving it as stateyearcounts2. Then use the table command to visually inspect that you have the full set of years for each state.
+
+
+```{r}
+##turn list into a data.frame
+missingyearsdf <- do.call("rbind", missingyearslist)
+
+##add to main dataframe
+stateyearcounts2 <- rbind.data.frame(stateyearcounts, missingyearsdf)
+
+##has 18 years per state in the data for
+##all states with at least one AE report
+table(stateyearcounts2$state)
+```
+
+
+---
+
+# Step three: using functions to plot
+
+**If you skipped challenge exercise 2A, load the data: stateyear.csv**
+
+Now your data are in a format more amenable to useful plotting. We're going to plot in two steps: 
+
+1. Creating two plots outside a function to get the code correct
+2. Generalizing to a function that will plot the counts by year for any group of states you choose 
+
+**Task one**: use ggplot to create separate plots for the counts of autism-related vaccine reports by year for two states-- New Jersey and New York--side by side. You can either do a bar or line graph. Make sure the title indicates which state it is and make sure the two plots have the same y axis range for comparability purposes (0 to the maximum reports out of the two)
+
+```{r, warning = FALSE, message = FALSE}
+library(ggplot2)
+
+##create vector with two state names (not necessary but can be useful for max)
+statesofinterest <- c("New Jersey", "New York")
+
+##create and store plots
+njplot <- ggplot(stateyearcounts2[stateyearcounts2$state == statesofinterest[1], ], 
+       aes(x = year, y = reports)) +
+      geom_bar(stat = "identity") +
+      ggtitle(statesofinterest[1]) +
+      ylim(0, max(stateyearcounts2$reports[stateyearcounts2$state 
+                                           %in% statesofinterest],
+                  na.rm = TRUE))
+nyplot <- ggplot(stateyearcounts2[stateyearcounts2$state == statesofinterest[2], ], 
+       aes(x = year, y = reports)) +
+      geom_bar(stat = "identity") +
+      ggtitle(statesofinterest[2])  +
+      ylim(0, max(stateyearcounts2$reports[stateyearcounts2$state 
+                                           %in% statesofinterest],
+                  na.rm = TRUE))
+
+##arrange side by side
+library(gridExtra)
+grid.arrange(njplot, nyplot)
+
+```
+
+**Task two**: now generalize into a function that can do the following:
+
+- Take in a vector of state names
+- Iterate through that vector and with each state, create and store a plot of that state's autism reports per year
+- Return a list containing all the stored plots (the length of the list will be equal to the number of states you specified in the vector of state names)
+
+Store the function
+
+*Hint*: Look at the above code for the two states. What did you change when copying and pasting? How can you subset the vector to give you the name of the state for the title and plot?
+
+
+```{r}
+allgraphs <- list()
+counthistfunc <- function(statesofinterest){
+  stategraph <- ggplot(stateyearcounts2[stateyearcounts2$state == 
+                        statesofinterest, ], #subsets the stateyearcounts to state of interest and creates a bar plot
+       aes(x = year, y = reports)) +
+      geom_bar(stat = "identity") +
+      ggtitle(statesofinterest) +
+      ylim(0, max(stateyearcounts2$reports[stateyearcounts2$state 
+                  %in% statesofinterest],
+                  na.rm = TRUE)) #makes y axis range go from 0 to max across plots- y axis should almost always start
+  #at zero to avoid exaggerating differences by deflating the axis, we're maxing it go to the max of the reports
+  #across the states of interest so that we can mor easily compare states
+  allgraphs[[statesofinterest]] <- stategraph #stores graph in a list
+  return(allgraphs)
+}
+
+```
+
+**Task two**: Run the function with different groups of states that you're interested in comparing (e.g., you could create a vector with the state where you grew up, the state where you went to college, and the state you're in now, and plot graphs for each). 
+
+Try with at least two different groups of states and store the results.
+
+
+```{r}
+#create vector with states of interest
+statesofinterest <- c("Illinois", "California", "New Jersey")
+
+#another state of interests
+statesofinterest2 <- c("Iowa", "Texas", "Mississippi", "Florida")
+
+listofstategraphs <- sapply(statesofinterest, counthistfunc)
+listofstategraphs2 <- sapply(statesofinterest2, counthistfunc)
+
+```
+
+
+**Task three**: use do.call to apply grid.arrange or another function for plotting multiple objects to the lists of state plots.
+
+```{r}
+do.call("grid.arrange", listofstategraphs)
+do.call("grid.arrange", listofstategraphs2)
+```
+
+Of course, you can still adapt the function more, for instance, to shrink the size of the axis labels depending on how many plots you're arranging, but we'll stop there for now.
+
+---
+
+# Step four: troubleshooting errors in functions
+
+In lecture, we reviewed a case where the function was insufficiently flexible to deal with a certain case (the example where the function indexed based on column but if you fed it a matrix below a certain size, the column index was out of bounds). One approach we took, in addition to making the function more general, was to use conditionals inside the function to print informative error messages when something goes wrong. Here, we're going to practice using those conditionals in the context of potential errors.
+
+We provide you with a function, *sample.subset* that does the following:
+
+- Takes the following arguments: data, number of draws (numdraws), the variable we want to take the mean of during the draw (varofinterest), i (number of times to draw from the sample), an empty vector to store the means (vecformeans),  a logical flag to indicate whether the sampling should be with or without replacement (replaceornot)
+- The function uses the sample command with the following arguments: sample from a numeric vector with 1...number of rows in the data, the number of samples = the number of draws argument, and whether it replaces or not equals the replaceornot argument
+- Then, the function subsets data based on those row ids and find the mean age from the numeric version of the variable (there are NA's in the data so make sure the arguments for mean still allow you to ignore those and still calculate)
+- The function repeats that process $i$ times and store the means in a vector
+- The function returns that vector of means that's equal to the number of iterations
+
+\textcolor{red}{I think some confusion arose in the task, potentially due to us not being super clear about naming the arguments, about the difference between two things. First is the number of draws to take in any given sample-- which we specify using the numdraws argument and in the sample command is specified with the argument size (or by placing that argument in the second position). Second is the number of samples to take (regardless of the number of draws per sample), which we specified using the "i" index but could also use the \textit{replicate} command in R to accomplish (which is actually a wrapper for sapply, and which repeats a function a specified number of times; note that this is distinct from the \textit{rep} command). The reason for including these two as separate arguments is that in certain cases, especially if we're sampling without replcement, we want to distinguish between:}
+
+\begin{enumerate}
+\item \textcolor{red}{Five random samples, each sample is of size 100}
+\item \textcolor{red}{One random sample, each sample is of size 500}
+\item \textcolor{red}{500 random samples, each sample is of size one}
+\end{enumerate}
+
+\textcolor{red}{Even though each produces 500 elements in the end.}
+
+```{r}
+#ran outside the function once
+rows_sampled <- sample(1:nrow(autismae), 
+                       100, replace = FALSE) 
+
+dfsamp <- autismae[rows_sampled, ]
+mean(dfsamp$agenumeric, na.rm = TRUE)
+
+#generalized to a function
+sample.subset <- function(varofinterest, data, numdraws, 
+                       replaceornot = FALSE, i, 
+                          vecformeans){
+  rows_sampled <- sample(1:nrow(data), 
+                  numdraws, replace = replaceornot)
+  df_sample <- data[rows_sampled, varofinterest]
+  sample_mean <- mean(df_sample, na.rm = TRUE)
+  vecformeans <- c(vecformeans, sample_mean)
+  return(vecformeans)
+}
+```
+
+
+**Task one**: use a function in the apply family to run the function for five iterations (i = 5) with 100 draws each iteration. Store the results in a vector. 
+
+```{r}
+#five times with 100 draws each time
+i <- 1:5
+means5x100draws <- sapply(i, sample.subset,
+               varofinterest = "agenumeric", 
+              data = autismae, 
+              numdraws = 100, replaceornot = FALSE,
+              vecformeans = c()) 
+head(means5x100draws)
+
+#could also ignore the i index and use the replicate command
+#note that the answer is obviously different from previous because
+#we're doing random sampling and didn't set seed
+meanwithrep <- replicate(5, sample.subset(varofinterest = "agenumeric",
+                       data = autismae, 
+                       numdraws = 100, 
+                       replaceornot = FALSE, 
+                       vecformeans = c()))
+head(meanwithrep)
+
+```
+
+
+**Task two**: now, run the function for five iterations (i = 5) with 2000 draws each iteration and the replacement flag still set to false. It should return an error. What's happening?
+
+**Answer**: error since we're not replacing the samples we're taking and we're trying to take more samples than there are rows. Also for R markdown purposes, note that I specified error = TRUE at the top of this code chunk to allow me to knit despite the presence of an error. You might want to check with your Soc 500 preceptors about whether using this option is permissible to allow you to knit a problem set to submit despite an error in the code that you can flag to preceptors.
+
+
+```{r, error = TRUE}
+test2 <- sapply(i, sample.subset, data = autismae,
+                numdraws = 2000, replaceornot = FALSE,
+                vecformeans = c()) 
+
+
+```
+
+
+**Task three**: the error message is already pretty informative so no need to write our own. Instead, add a condition to the function that checks if the number of draws is greater than the number of rows in the dataframe. If that is the case, then the function should round the number of draws down to 0.9 x the number of rows in the data.frame and proceed with the rest of the steps (sampling, subsetting the data, finding the mean age)
+
+
+```{r}
+sample.subset2 <- function(data, numdraws, replaceornot = FALSE, i, 
+                          vecformeans){
+  if(numdraws > nrow(data)){
+    newnumdraws <- 0.9 * nrow(data)
+    rows_sampled <- sample(1:nrow(data), newnumdraws, 
+                           replace = replaceornot)
+    df_sample <- data[rows_sampled, ]
+    meanage <- mean(df_sample$agenumeric, na.rm = TRUE)
+    vecformeans <- c(vecformeans, meanage)
+  } else {
+    rows_sampled <- sample(1:nrow(data), numdraws, replace = replaceornot)
+    df_sample <- data[rows_sampled, ]
+    meanage <- mean(df_sample$agenumeric, na.rm = TRUE)
+    vecformeans <- c(vecformeans, meanage)
+  }
+  return(vecformeans)
+}
+```
+
+**Task four**: practice applying that function to two cases: a case where the number of draws exceeds the number of rows in the data and a case where the number of draws is less than the number of rows in the data to confirm that the function works in either case.
+
+```{r}
+#exceeds rows
+i <- 1:5
+test3 <- sapply(i, sample.subset2, data = autismae,
+                numdraws = 5000, replaceornot = FALSE,
+                vecformeans = c()) 
+head(test3)
+
+#less than nrows
+i <- 1:5
+test4 <- sapply(i, sample.subset2, data = autismae,
+                numdraws = 300, replaceornot = FALSE,
+                vecformeans = c()) 
+head(test4)
+
+```
+
