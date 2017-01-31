@@ -1,2 +1,3 @@
-# teaching_examples
-This is code I've created for teaching/TA-related lectures and assignments
+Teaching examples
+
+Here is some code I have created as part of teaching and TA-related lectures and assignments.
