@@ -199,7 +199,6 @@ Now you've come up with all you need for the meat of the function. To put the ca
 
 grepl("pattern to search", vector to search for pattern in)
 
-\textcolor{red}{Note: here we labeled these potential functions, and there are likely many other ways to solve (for instance, below we also wrote a function that draws upon the solution Alex and Ferdose's group came up with during the work session that involves recoding age in months to its equivalent in years by calculating what that is and then writing it as a string, which means the function will only have two cases to handle (Unknown and age in years) rather than three cases to handle (Unknown, age in years, age in month)). Whatever is fine and the purpose of this activity was not to generate a single answer but to give you practice in thinking through a common data recoding problem where you need to treat different cases a bit differently}
 
 **Task six**: with the three above steps as your guide, create a function, *agemidfunc* and store it.
 
