@@ -1,0 +1,470 @@
+---
+title: "Example of E-M with Gaussian mixture model"
+author: "Rebecca"
+date: "March 29, 2017"
+output: pdf_document
+---
+
+We're going to practice applying the EM algorithm to a multivariate normal distribution where we are assuming there are $k = 3$ clusters. 
+
+We're going to do so in two stages:
+
+\begin{enumerate}
+\item Get the basics down with a few iterations where we print the results
+\item Embed into a \texttt{while} loop that will stop at the definition of convergence we choose: differences between the old and newer values of parameters get very small
+\end{enumerate}
+
+We're going to practice with example data on characteristics of wine from different 'cultivars' in Italy from the \texttt{gclus} package.
+
+
+```{r}
+# Load data
+library(gclus)
+library(ggplot2)
+##3 clusters, 13 dimensions
+##see if can implement
+data(wine, package = "gclus")
+head(wine)
+
+##plot two dimensions and coor by class
+ggplot(wine, aes(x = Alcohol, 
+  y = Phenols, color = as.factor(Class))) +
+  geom_point() 
+
+##recover latent cluster labels- and then see how
+##corresponds
+
+
+```
+
+
+\subsection{Step two: implement the steps described on Lecture slides 38 and 39}
+
+\subsubsection{Step one: Initialize the parameters}
+
+Set k to 3 
+
+```{r}
+
+##restrict wine data to Alcohol, Phenols, and class
+library(dplyr)
+wine2 <- wine %>%
+        select(Class, Alcohol, Phenols)
+head(wine2)
+
+#three probability of cluster assignments
+pi_init <- c(0.3333, 0.3333, 0.33333)
+
+##divide data into thirds
+cut1 <- round(nrow(wine2)/3)
+cut2 <- round(cut1 + nrow(wine2)/3)
+
+
+##initialize three 2-length mean vector
+mu_1_init <- c(mean(wine2$Alcohol[1:cut1]),
+               mean(wine2$Phenols[1:cut1]))
+mu_2_init <- c(mean(wine2$Alcohol[cut1:cut2]),
+               mean(wine2$Phenols[cut1:cut2]))
+mu_3_init <- c(mean(wine2$Alcohol[cut2:nrow(wine2)]),
+               mean(wine2$Phenols[cut2:nrow(wine2)])) 
+
+##initialize sigma to identity matrix
+sigma_1_init <- sigma_2_init <- sigma_3_init <- matrix(c(1, 0, 0, 1),
+                                                       nrow = 2, ncol = 2,
+                                                       byrow= TRUE)
+sigma_1_init
+
+
+
+```
+
+
+\subsubsection{Step two: compute responsibilities for each observation and cluster}
+
+
+First, let's try with observation 1 and observation 2 and then see how vector of responsibilities corresponds to observed classes
+
+```{r}
+##store the denominator
+denom_resp_1 <- pi_init[1] * dmvnorm(x = c(wine2[1, "Alcohol"],
+                      wine2[1, "Phenols"]),
+                      mean = mu_1_init,
+                      sigma = sigma_1_init) +
+        pi_init[2] * dmvnorm(x = c(wine2[1, "Alcohol"],
+                      wine2[1, "Phenols"]),
+                      mean = mu_2_init,
+                      sigma = sigma_2_init) +
+        pi_init[3] * dmvnorm(x = c(wine2[1, "Alcohol"],
+                      wine2[1, "Phenols"]),
+                            mean = mu_3_init,
+                          sigma = sigma_3_init)
+
+
+r_11 <- pi_init[1] * dmvnorm(x = c(wine2[1, "Alcohol"],
+                    wine2[1, "Phenols"]),
+                    mean = mu_1_init,
+                    sigma = sigma_1_init)/denom_resp_1    
+r_11
+   
+
+r_12 <- pi_init[2] * dmvnorm(x = c(wine2[1, "Alcohol"],
+                            wine2[1, "Phenols"]),
+                    mean = mu_2_init,
+                    sigma = sigma_2_init)/denom_resp_1   
+r_12
+
+r_13 <- pi_init[3] * dmvnorm(x = c(wine2[1, "Alcohol"],
+                            wine2[1, "Phenols"]),
+                    mean = mu_3_init,
+                    sigma = sigma_3_init)/denom_resp_1   
+r_13
+
+##try with second data point
+denom_resp_2 <- pi_init[1] * dmvnorm(x = c(wine2[nrow(wine2), "Alcohol"],
+                      wine2[nrow(wine2), "Phenols"]),
+                      mean = mu_1_init,
+                      sigma = sigma_1_init) +
+        pi_init[2] * dmvnorm(x = c(wine2[nrow(wine2), "Alcohol"],
+                      wine2[nrow(wine2), "Phenols"]),
+                      mean = mu_2_init,
+                      sigma = sigma_2_init) +
+        pi_init[3] * dmvnorm(x = c(wine2[nrow(wine2), "Alcohol"],
+                      wine2[nrow(wine2), "Phenols"]),
+                            mean = mu_3_init,
+                          sigma = sigma_3_init)
+
+##compute responsibilities
+r_last1 <- pi_init[1] * dmvnorm(x = c(wine2[nrow(wine2), "Alcohol"],
+                            wine2[nrow(wine2), "Phenols"]),
+                    mean = mu_1_init,
+                    sigma = sigma_1_init)/denom_resp_2    
+r_last1
+   
+r_last2 <- pi_init[2] * dmvnorm(x = c(wine2[nrow(wine2), "Alcohol"],
+                            wine2[nrow(wine2), "Phenols"]),
+                    mean = mu_2_init,
+                    sigma = sigma_2_init)/denom_resp_2   
+r_last2
+
+r_last3 <- pi_init[3] * dmvnorm(x = c(wine2[nrow(wine2), "Alcohol"],
+                            wine2[nrow(wine2), "Phenols"]),
+                    mean = mu_3_init,
+                    sigma = sigma_3_init)/denom_resp_2   
+r_last3
+
+##look at each compared to observed
+wine2[1, "Class"]; c(r_11, r_12, r_13)
+
+#
+wine2[nrow(wine2), "Class"]; c(r_last1, r_last2, r_last3)
+
+##compute responsibilities for all n observations
+store_r <- matrix(NA, nrow = nrow(wine2), ncol = 3)
+denom_resp <- rep(NA, nrow(wine2))
+for(i in 1:nrow(wine2)){
+  #denominator for responsibilities
+  denom_resp[i] <- pi_init[1] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                      mean = mu_1_init,
+                      sigma = sigma_1_init) +
+        pi_init[2] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                      mean = mu_2_init,
+                      sigma = sigma_2_init) +
+        pi_init[3] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                            mean = mu_3_init,
+                          sigma = sigma_3_init)
+  
+  #responsibility 1
+  store_r[i, 1] <- pi_init[1] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_1_init,
+                    sigma = sigma_1_init)/denom_resp[i]
+  
+  store_r[i, 2] <- pi_init[2] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_2_init,
+                    sigma = sigma_2_init)/denom_resp[i]
+  
+  store_r[i, 3] <- pi_init[3] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_3_init,
+                    sigma = sigma_3_init)/denom_resp[i]
+  
+}
+head(store_r)
+summary(store_r)
+
+
+
+```
+
+\subsubsection{Step three: m-step}
+
+
+First, update the probabilities of belonging to each cluster
+
+```{r}
+pi_new <- colSums(store_r)/nrow(store_r)
+pi_new
+
+```
+
+Then, update the mean for each cluster as weighted average
+
+```{r}
+n_1 <- sum(store_r[, 1])
+n_2 <- sum(store_r[, 2])
+n_3 <- sum(store_r[, 3]) 
+mu_1_new <- c(sum(store_r[, 1] * wine2[, "Alcohol"])/n_1,
+              sum(store_r[, 1] * wine2[, "Phenols"]/n_1)) 
+mu_1_new; mu_1_init
+mu_2_new <- c(sum(store_r[, 2] * wine2[, "Alcohol"])/n_2,
+              sum(store_r[, 2] * wine2[, "Phenols"]/n_2)) 
+mu_2_new; mu_2_init
+mu_3_new <- c(sum(store_r[, 3] * wine2[, "Alcohol"])/n_3,
+              sum(store_r[, 3] * wine2[, "Phenols"]/n_3)) 
+mu_3_new; mu_3_init
+
+```
+
+Finally, with those new mu's, compute updated sigma for each cluster
+
+```{r}
+mat_function <- function(i, mu, k, allmat){
+  x_min_mu <- rbind(wine2[i, c("Alcohol")] - mu[1],
+              wine2[i, c("Phenols")] - mu[2])
+  x_min_mu_t <- t(x_min_mu)
+  prod_x_min_mu <- x_min_mu %*% x_min_mu_t
+  r_prod_x_min_mu <- store_r[i, k] * prod_x_min_mu
+  all_mat[] <- r_prod_x_min_mu
+}
+
+##store results- make into a matrix
+sigma_1_all <- sapply(1:178, mat_function, mu = mu_1_new,
+               k = 1, allmat = list())
+sigma_1_mat <- matrix(c(sum(sigma_1_all[1, ]),
+                        sum(sigma_1_all[2, ]),
+                        sum(sigma_1_all[3, ]),
+                        sum(sigma_1_all[4, ])),
+                        nrow = 2, ncol = 2, byrow = TRUE) 
+#rescale by n1
+sigma_1_new <- (1/n_1) * sigma_1_mat
+sigma_1_new; sigma_1_init
+
+##repeat for sigma_2 and sigma_3
+sigma_2_all <- sapply(1:178, mat_function, mu = mu_2_new,
+               k = 2, allmat = list())
+sigma_2_mat <- matrix(c(sum(sigma_2_all[1, ]),
+                        sum(sigma_2_all[2, ]),
+                        sum(sigma_2_all[3, ]),
+                        sum(sigma_2_all[4, ])),
+                        nrow = 2, ncol = 2, byrow = TRUE) 
+#rescale by n
+sigma_2_new <- (1/n_2) * sigma_2_mat
+sigma_2_new; sigma_2_init
+
+##sigma_3
+sigma_3_all <- sapply(1:178, mat_function, mu = mu_3_new,
+               k = 3, allmat = list())
+sigma_3_mat <- matrix(c(sum(sigma_3_all[1, ]),
+                        sum(sigma_3_all[2, ]),
+                        sum(sigma_3_all[3, ]),
+                        sum(sigma_3_all[4, ])),
+                        nrow = 2, ncol = 2, byrow = TRUE) 
+#rescale by n
+sigma_3_new <- (1/n_3) * sigma_3_mat
+sigma_3_new; sigma_3_init
+
+```
+
+Then, feed those new mu and sigma back into responsibilities step and repeat
+
+Practice with one update of responsibilities
+
+```{r}
+##assign new values to initial values
+pi_init <- pi_new
+mu_1_init <- mu_1_new
+mu_2_init <- mu_2_new
+mu_3_init <- mu_3_new
+sigma_1_init <- sigma_1_new
+sigma_2_init <- sigma_2_new
+sigma_3_init <- sigma_3_new
+
+store_r_2 <- matrix(NA, nrow = nrow(wine2), ncol = 3)
+denom_resp <- rep(NA, nrow(wine2))
+for(i in 1:nrow(wine2)){
+  #denominator for responsibilities
+  denom_resp[i] <- pi_init[1] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                      mean = mu_1_init,
+                      sigma = sigma_1_init) +
+        pi_init[2] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                      mean = mu_2_init,
+                      sigma = sigma_2_init) +
+        pi_init[3] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                            mean = mu_3_init,
+                          sigma = sigma_3_init)
+  
+  #responsibility 1
+  store_r_2[i, 1] <- pi_init[1] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_1_init,
+                    sigma = sigma_1_init)/denom_resp[i]
+  
+  store_r_2[i, 2] <- pi_init[2] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_2_init,
+                    sigma = sigma_2_init)/denom_resp[i]
+  
+  store_r_2[i, 3] <- pi_init[3] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_3_init,
+                    sigma = sigma_3_init)/denom_resp[i]
+  
+}
+head(store_r_2)
+summary(store_r_2)
+
+```
+
+
+Create two contrasting plots- one with real versus assigned to highest from iteration 1 and another with real versus assigned to highest with iteration 2
+
+```{r}
+#assign each observation to their m
+wine3 <- wine2 %>%
+          mutate(label_iter1 = max.col(store_r, ties.method = 'first'),
+                 label_iter2 = max.col(store_r_2, ties.method = 'first')) 
+
+wine3
+
+
+```
+
+Generalize into more iterations
+
+
+```{r}
+#for simplicity, define difference
+#as between mu1 and mu2
+pi_init <- c(0.333, 0.3333, 0.3333)
+diff <- mean(abs(pi_init - pi_new))
+diff
+while(diff > 0.0001){
+  
+  #e-step of responsibiliites matrix
+  store_r <- matrix(NA, nrow = nrow(wine2), ncol = 3)
+  denom_resp <- rep(NA, nrow(wine2))
+  for(i in 1:nrow(wine2)){
+  #denominator for responsibilities
+  denom_resp[i] <- pi_init[1] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                      mean = mu_1_init,
+                      sigma = sigma_1_init) +
+        pi_init[2] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                      mean = mu_2_init,
+                      sigma = sigma_2_init) +
+        pi_init[3] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                      wine2[i, "Phenols"]),
+                            mean = mu_3_init,
+                          sigma = sigma_3_init)
+  
+  #responsibility 1
+  store_r[i, 1] <- pi_init[1] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_1_init,
+                    sigma = sigma_1_init)/denom_resp[i]
+  
+  store_r[i, 2] <- pi_init[2] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_2_init,
+                    sigma = sigma_2_init)/denom_resp[i]
+  
+  store_r[i, 3] <- pi_init[3] * dmvnorm(x = c(wine2[i, "Alcohol"],
+                            wine2[i, "Phenols"]),
+                    mean = mu_3_init,
+                    sigma = sigma_3_init)/denom_resp[i]
+  
+
+  }
+  
+  ##m-step - update each parameter
+  pi_new <- colSums(store_r)/nrow(store_r)
+
+  #update n's 
+  n_1 <- sum(store_r[, 1])
+  n_2 <- sum(store_r[, 2])
+  n_3 <- sum(store_r[, 3]) 
+  
+  #update mu's
+  mu_1_new <- c(sum(store_r[, 1] * wine2[, "Alcohol"])/n_1,
+              sum(store_r[, 1] * wine2[, "Phenols"]/n_1)) 
+  mu_2_new <- c(sum(store_r[, 2] * wine2[, "Alcohol"])/n_2,
+              sum(store_r[, 2] * wine2[, "Phenols"]/n_2)) 
+  mu_3_new <- c(sum(store_r[, 3] * wine2[, "Alcohol"])/n_3,
+              sum(store_r[, 3] * wine2[, "Phenols"]/n_3)) 
+
+  #update sigma's
+  sigma_1_all <- sapply(1:178, mat_function, mu = mu_1_new,
+               k = 1, allmat = list())
+  sigma_1_mat <- matrix(c(sum(sigma_1_all[1, ]),
+                        sum(sigma_1_all[2, ]),
+                        sum(sigma_1_all[3, ]),
+                        sum(sigma_1_all[4, ])),
+                        nrow = 2, ncol = 2, byrow = TRUE) 
+  #rescale by n1
+  sigma_1_new <- (1/n_1) * sigma_1_mat
+
+  ##repeat for sigma_2 and sigma_3
+  sigma_2_all <- sapply(1:178, mat_function, mu = mu_2_new,
+               k = 2, allmat = list())
+  sigma_2_mat <- matrix(c(sum(sigma_2_all[1, ]),
+                        sum(sigma_2_all[2, ]),
+                        sum(sigma_2_all[3, ]),
+                        sum(sigma_2_all[4, ])),
+                        nrow = 2, ncol = 2, byrow = TRUE) 
+  #rescale by n
+  sigma_2_new <- (1/n_2) * sigma_2_mat
+
+  ##sigma_3
+  sigma_3_all <- sapply(1:178, mat_function, mu = mu_3_new,
+               k = 3, allmat = list())
+  sigma_3_mat <- matrix(c(sum(sigma_3_all[1, ]),
+                        sum(sigma_3_all[2, ]),
+                        sum(sigma_3_all[3, ]),
+                        sum(sigma_3_all[4, ])),
+                        nrow = 2, ncol = 2, byrow = TRUE) 
+  #rescale by n
+  sigma_3_new <- (1/n_3) * sigma_3_mat
+  
+  ##before reassigning, calculate new diff
+  diff <- mean(abs(pi_init - pi_new))
+  
+  #reassign new values to initial values
+  ##assign new values to initial values
+  pi_init <- pi_new
+  mu_1_init <- mu_1_new
+  mu_2_init <- mu_2_new
+  mu_3_init <- mu_3_new
+  sigma_1_init <- sigma_1_new
+  sigma_2_init <- sigma_2_new
+  sigma_3_init <- sigma_3_new
+  
+  
+}
+
+#view results
+head(store_r)
+
+#can then compare new means to actual means (we gave it really informative
+#starting means to make sure responsibility step worked but does especially for 
+#cluster 3 get closer- to start with less informative initial values, can reshuffle data
+#so that it's no longer ordered by actual cluster)
+
+```
