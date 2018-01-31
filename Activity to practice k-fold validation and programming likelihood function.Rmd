@@ -1,0 +1,369 @@
+---
+title: "Example teaching activity: covers cross-validation and optimizing a likelihood function"
+author: "Rebecca Johnson"
+date: "March 8, 2017"
+output: pdf_document
+---
+
+## Load data and packages
+
+```{r, warning = FALSE, message = FALSE}
+library(separationplot)
+library(foreign)
+library(MASS)
+library(tidyverse)
+library(Zelig)
+library(ZeligChoice)
+library(reshape2)
+library(xtable)
+
+setwd("~/Dropbox/Working materials soc 504/precept5 draft")
+war <- read.dta("KSAJPSgallup.dta")
+head(war)
+
+##glm implementation of probit
+probit_glm <- glm(iraqamistake ~ totantiwarthroughjune16 + gop3 +
+      dem3 + age + education4 + male + white,
+      data = war, family = binomial(link = "probit")) 
+
+##look at fitted values- see they're length 970
+##because 30 obs had NA on outcome or one covar
+probit_outcome_predicted <- fitted(probit_glm)
+head(probit_outcome_predicted); length(probit_outcome_predicted)
+
+##bind fitted values to data- we do this
+##using model.matrix in case NA were removed during
+##the course of the 
+probit_df_used <- model.matrix(probit_glm)
+probit_outcome_observed <- probit_glm$y
+
+##data.frame with data, actual outcome, and predicted outcome
+probit_df_all <- cbind.data.frame(probit_df_used, 
+                                  probit_outcome_predicted,
+                                  probit_outcome_observed) 
+
+##step one, order the cases by their fitted values
+probit_df_order <- probit_df_all %>%
+                  arrange(probit_outcome_predicted) %>%
+                  select(probit_outcome_predicted, 
+                         probit_outcome_observed)
+head(probit_df_order)
+
+
+##way one: can plot the data points on a horizontal
+##line by their order
+ggplot(data=probit_df_order) +
+  geom_rect(aes(xmin = 0, 
+    xmax = seq(length.out = length(probit_outcome_observed)), 
+      ymin = 0, ymax = 1),
+    fill = "#FEE8C8") +
+  geom_linerange(aes(color = factor(probit_outcome_observed,
+            levels = c(0, 1),
+            labels = c("0 = not mistake",
+          "1 = mistake")), 
+    ymin = 0, ymax = 1, x = seq(length.out = 
+    length(probit_outcome_observed))),
+    alpha = 0.4) +
+  labs(color = "Observed value: Was Iraq war \n a mistake")  +
+  geom_line(aes(y = probit_outcome_predicted, 
+                x = seq(length.out = 
+                length(probit_outcome_observed))), lwd = 0.8) +
+  theme_bw() +
+  xlab("Order of predicted values (smallest to largest)") +
+  ylab("Predicted value for answering 1 = mistake") +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        legend.position = c(0.75, 0.25))
+
+
+##way two: plot using separation plot package 
+separationplot(probit_df_order$probit_outcome_predicted, 
+               probit_df_order$probit_outcome_observed,
+      type = "line", line = T, lwd1 = 0.5, lwd2 = 0.5,
+xlab = "Predicted values in order", shuffle = T, width = 9, height = 1.2,
+col0 = "#FEF0D9", col1 = "#E34A33", flag = NULL, flagcol = 1,
+file = "~/Dropbox/Working materials soc 504/precept5 draft/auto_sep_plot.pdf", newplot = TRUE, locate = NULL, rectborder = NA,
+show.expected = F, zerosfirst = T, BW = F, heading = "Separation plot for Was Iraq a Mistake predicted outcome: package version")
+
+
+```
+
+
+# Technique two: k-fold cross validation
+
+```{r}
+#outside function, remove those with na on relevant covars,
+#shuffle data and divide into k folds
+war_nomiss <- cbind.data.frame(probit_df_used,
+                               probit_outcome_observed) 
+colnames(war_nomiss)[9] <- "iraqamistake"
+head(war_nomiss)
+
+##shuffle and add indicator for 1...K = 10 folds
+war_shuffle <- war_nomiss %>%
+                sample_n(nrow(war_nomiss),
+                         replace = FALSE) 
+war_shuffle <- war_shuffle %>%
+              mutate(fold_indic = 
+              rep_len(1:10, nrow(war_shuffle)))
+
+##create formulae
+form_withspeech <- formula(iraqamistake ~ 
+totantiwarthroughjune16 + gop3 + dem3 + age + education4 + 
+male + white)
+
+form_nospeech <- formula(iraqamistake ~  gop3 + dem3 +
+age + education4 + male + white)
+
+form_nopol <- formula(iraqamistake ~  
+totantiwarthroughjune16 + age + education4 + male + white)
+
+
+##program function to apply to 1:10 k, would
+##want to restructure this if we're repeating
+##the process many times (e.g., do 10-fold cross validation 
+##10,000 times and plot distribution of estimates)
+crossval.mod <- function(k, data, form_of_interest){
+  
+  ##divide data into training and test set
+  test_data <- data %>% filter(fold_indic == k)
+  train_data <- data %>% filter(fold_indic != k)
+
+  ##fit model on training data
+  mod_train <-  glm(form_of_interest, data = train_data,
+            family = binomial(link = "probit")) 
+
+  ##use that model to predict outcomes in test df
+  predict_test <- predict(mod_train, newdata = test_data,
+                        type = "response")
+
+  ##bind with observed values in test data
+  ##, round, and code if it equals the observed 
+  ##value, and then summarise the fraction that match
+  frac_match_res <- test_data %>%
+              mutate(pred_out = predict_test,
+                     round_pred_out = round(pred_out, 0),
+                     match_obs_pred = ifelse(round_pred_out == 
+                    iraqamistake, 1, 0)) %>%
+              summarise(frac_match = sum(match_obs_pred)/
+                        nrow(test_data)) 
+  
+    ##return the fraction that match
+    return(frac_match_res)
+}
+
+##apply the 10-fold cross-val to each formula
+##for predicting views on iraq as a mistake
+kfold_res_speech <- sapply(1:10, crossval.mod, 
+                    data = war_shuffle,
+                    form_of_interest = form_withspeech)
+paper_mod <- mean(unlist(kfold_res_speech))
+
+kfold_res_nospeech <- sapply(1:10, crossval.mod, 
+                    data = war_shuffle,
+                    form_of_interest = form_nospeech) 
+nospeech <- mean(unlist(kfold_res_nospeech))
+
+kfold_res_nopol <- sapply(1:10, crossval.mod, 
+                    data = war_shuffle,
+                    form_of_interest = form_nopol) 
+nopol <- mean(unlist(kfold_res_nopol))
+
+
+##bind into table to print
+fit_results <- data.frame(model = c("Model in paper",
+                                    "Model without speech predictor",
+                                    "Model without respondent pol. predictor"),
+                          results = c(paper_mod,
+                                      nospeech,
+                                      nopol))
+
+```
+
+
+# Ordered probit
+
+## Implementing using log-likelihood and optim
+
+```{r, warning = FALSE}
+##to prepare,
+##create war no NA that is complete.cases for relevant
+##vars, note that N matches N in paper
+war_noNA <- war %>%
+            select(staythecourseindex,
+                   totantiwarthroughjune16, gop3, 
+              dem3, age, education4, male, white) %>%
+            filter(complete.cases(.)) 
+head(war_noNA)
+nrow(war_noNA)
+
+
+##first make an empty matrix Z indicating 
+##what category a respondent falls in
+##rows = number of respondents
+##columns = number of levels of ordered response
+levels <- length(unique(war_noNA$staythecourseindex))
+Z <- matrix(NA, nrow(war_noNA), levels)
+y <- war_noNA$staythecourseindex
+y0 <- sort(unique(y))
+
+head(Z)
+
+##then, populate that Z matrix with each respondent
+##and indicating whether they do (TRUE) or
+##don't (FALSE) fall into that level
+for(j in 1:levels){
+  Z[, j] <- y == y0[j]
+}
+
+##view head to see that they match
+head(Z)
+head(war_noNA)
+
+##create X matrix- no intercept because
+##we fix tau_1 to be cutoff point and intercept
+##by not adding an intercept to the X,
+##we're estimating that tau_1
+X <- as.matrix(war_noNA %>%
+              select(totantiwarthroughjune16,
+                     gop3, dem3, age, education4,
+                     male, white))
+head(X)
+
+##now, we create a loglik that we
+##feed the data, outcome matrix (indicating
+##responses for each person, and parameters vector)
+loglik.probit <- function(par, Z, X){
+  
+    ##first, we separate the parameters
+    ##vector into two types of parameters- beta 
+    ##and tau thresholds
+    beta <- par[1:ncol(X)]
+    tau <- par[(ncol(X)+1):length(par)]
+    
+    ##creates each respondent's
+    ##latent variable y* as product
+    ##of coefficients and covariate vals
+    ystarmu <- X%*%beta
+    
+    ##levels (m in notation) is # of 
+    ##thresholds + 1
+    levels <- length(tau) + 1
+    
+    ##create matrix for cutoff probabilities
+    cprobs = matrix(nrow=length(ystarmu), ncol=levels)
+    
+    ##create matrix for ADD
+    probs <- matrix(nrow=nrow(X), ncol=levels)
+    
+    ##for levels 1-3, estimate each
+    ##respondent's difference in cumul.prob
+    ##of y* falling within thresholds for that level
+    for (j in 1:(levels-1))
+          cprobs[,j] <- pnorm(tau[j]- ystarmu)
+    
+    ##for last level, probability is 1 - 
+    ##probability of 3rd level
+    probs[,levels] <- 1-cprobs[,levels-1]
+    
+    ##add in estimated prob for first level
+    probs[,1] <- cprobs[,1]
+    
+    ##iterate through the 2nd and 3rd level
+    ##of the ordinal variable and compute
+    ##probability as c2-c1 (for second level)
+    ##and c3-c2 (for third level)
+    ##results in a mtrix with respondent prob
+    ##of falling in each level filled in
+    ##each respondent's probability sums to 1
+    for (j in 2:(levels-1))
+          probs[,j] <- cprobs[,j] - cprobs[,(j-1)]
+    
+    ##sum the logged probabilities to get
+    ##log.lik
+    sum(log(probs[Z]))
+}
+
+##try optimizing
+##for parameters, 
+##use the lm val
+reg_lm <- lm(staythecourseindex ~ totantiwarthroughjune16 + gop3 +
+              dem3 + age + education4 + male + white,
+             data = war_noNA) 
+coef_lm <- coef(reg_lm)[-1]
+par <- c(coef_lm, 0, 1, 2)
+
+optim(par, loglik.probit,
+      Z = Z, X = X, method = "BFGS",
+      control = list(fnscale = -1))
+
+
+```
+
+
+## Check results using Zelig
+
+```{r}
+
+ordered.prob <- zelig(factor(staythecourseindex) ~ totantiwarthroughjune16 + gop3 +
+              dem3 + age + education4 + male + white,
+              data = war, model = "oprobit") 
+
+
+```
+
+
+## Using zelig for simulation for QOI
+
+```{r}
+##set to male and female with others at 
+##mean if numeric, median if ordered factor,
+##or mode if unordered factor or character
+x.repub <- setx(ordered.prob, gop3 = 1)
+x.dem <- setx(ordered.prob, gop3 = 0)
+
+##use sim to find first differences
+sim.oprobit <- sim(ordered.prob, 
+                   x = x.repub,
+                   x1 = x.dem,
+                   num = 10000)
+
+##view summary
+summary(sim.oprobit)
+
+##use the get_qi (get quantity of interest)
+##argument with the results of the simulation
+##to get the first differences (FD) for each
+##of the categories/10,000 simulations
+fd_allsims <- sim.oprobit$get_qi(xvalue = "x1",
+                                  qi = "fd") 
+head(fd_allsims); nrow(fd_allsims)
+
+##reshape the data and plot each of the categories
+##on separate plots to see which differences are driving
+##overall diff between dem and republican respondents
+##on Iraq war
+fd_longformat <- as.data.frame(fd_allsims) %>%
+                  mutate(sim_num = 1:nrow(fd_allsims)) %>%
+                  reshape2::melt(id.vars = "sim_num") 
+colnames(fd_longformat)[2:3] <- c("iraq_response_level",
+                                  "first_diff") 
+                
+##now, plot the distribution of first differences for
+##each response category
+ggplot(fd_longformat, aes(x = first_diff)) +
+  geom_histogram(fill = "red", alpha = 0.3,
+                 color = "black") +
+  ylab("Count of simulations (out of 10,000)") +
+  xlab("Difference in expected probability of category \n between Dem. and Repub. respondents (other covariates at mean/medians) ") +
+  ggtitle("What should troops do in Iraq War?") +
+  theme_bw() +
+  facet_wrap(~ factor(iraq_response_level, 
+              levels= c(1, 2, 3, 4),
+              labels = c("Withdraw immediately",
+              "Withdraw in next year",
+              "Stay as long as necessary",
+              "Increase number of troops"))) 
+
+
+```
